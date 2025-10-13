@@ -24,25 +24,25 @@ jobs:
       - name: Determine target repo from label
         id: target
         run: |
-          echo "🟡 Detectando label..."
+          echo "Detectando label..."
           LABEL_NAME="${{ github.event.label.name }}"
           
           if [ -z "$LABEL_NAME" ]; then
-            echo "⚠️ Nenhuma label no evento direto, tentando pegar a primeira label da issue..."
+            echo "Nenhuma label no evento direto, tentando pegar a primeira label da issue..."
             LABEL_NAME=$(echo "${{ github.event.issue.labels[0].name }}" | tr -d '[:space:]')
           fi
 
           if [ -z "$LABEL_NAME" ]; then
-            echo "❌ Nenhuma label encontrada. Encerrando."
+            echo "Nenhuma label encontrada. Encerrando."
             exit 1
           fi
 
           echo "repo=$LABEL_NAME" >> $GITHUB_OUTPUT
-          echo "✅ Repositório alvo: $LABEL_NAME"
+          echo "Repositório alvo: $LABEL_NAME"
 
       - name: Create issue in target repository
         run: |
-          echo "🚀 Criando issue em Ambiente-de-Testes/${{ steps.target.outputs.repo }}..."
+          echo "Criando issue em Ambiente-de-Testes/${{ steps.target.outputs.repo }}..."
           RESPONSE=$(curl -s -o response.json -w "%{http_code}" -X POST \
             -H "Authorization: token ${{ secrets.GH_TOKEN }}" \
             -H "Accept: application/vnd.github.v3+json" \
@@ -55,9 +55,9 @@ jobs:
           EOF
           )
 
-          echo "🔍 Código de resposta: $RESPONSE"
+          echo "Código de resposta: $RESPONSE"
           cat response.json
           if [ "$RESPONSE" -ne 201 ]; then
-            echo "❌ Falha ao criar a issue."
+            echo "Falha ao criar a issue."
             exit 1
           fi
