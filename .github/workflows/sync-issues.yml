@@ -2,7 +2,7 @@ name: Sync Issues to Target Repo
 
 on:
   issues:
-    types: [opened, labeled]
+    types: [labeled]
 
 jobs:
   sync:
