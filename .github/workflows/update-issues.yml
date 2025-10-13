@@ -1,13 +1,13 @@
-name: Update issues
+name: Update Issues
 
 on:
   issues:
     types: [opened, closed]
   pull_request:
-    types: [opened, closed]
+    types: [opened, closed, reopened]
   create:
     branches:
-      - '**'  # qualquer branch criada
+      - '**'
 
 jobs:
   update-project:
@@ -17,69 +17,86 @@ jobs:
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           script: |
-            const projectId = "PVT_kwDODixzhM4BFb_a"; // ProjectV2 ID
-            const statusFieldId = "PVTSSF_lADODixzhM4BFb_azg2xh6E"; // Field ID do Status
+            const projectId = "PVT_kwDODixzhM4BFb_a";
+            const statusFieldId = "PVTSSF_lADODixzhM4BFb_azg2xh6E";
 
-            async function moveIssueToStatus(itemId, statusName) {
-              const mutation = `
+            // Extrai número da issue do nome da branch (assume padrão: NUMERO-descricao)
+            function extractIssueNumberFromBranch(branchName) {
+              const match = branchName.match(/^(\d+)-/);
+              return match ? parseInt(match[1], 10) : null;
+            }
+
+            async function getOrCreateItem(issueNumber) {
+              if (!issueNumber) return null;
+
+              // Tenta encontrar o item do ProjectV2
+              const res = await github.graphql(`
+                query ($projectId: ID!) {
+                  organization(login: "SEU_ORG") {
+                    projectV2(number: ${projectId}) {
+                      items(first: 50) {
+                        nodes {
+                          content { ... on Issue { number } }
+                          id
+                        }
+                      }
+                    }
+                  }
+                }
+              `);
+
+              const node = res.organization.projectV2.items.nodes.find(n => n.content?.number === issueNumber);
+              if (node) return node.id;
+
+              // Se não existir, cria um novo item vinculado à issue
+              const issueId = context.payload.issue?.id || context.payload.pull_request?.id;
+              if (!issueId) return null;
+
+              const creation = await github.graphql(`
+                mutation ($projectId: ID!, $issueId: ID!) {
+                  addProjectV2ItemById(input: { projectId: $projectId, contentId: $issueId }) {
+                    item { id }
+                  }
+                }
+              `, { projectId, issueId });
+
+              return creation.addProjectV2ItemById.item.id;
+            }
+
+            async function moveItem(itemId, statusName) {
+              if (!itemId) return;
+              await github.graphql(`
                 mutation ($projectId: ID!, $itemId: ID!, $statusFieldId: ID!, $statusName: String!) {
                   updateProjectV2ItemField(input: {
                     projectId: $projectId,
                     itemId: $itemId,
                     fieldId: $statusFieldId,
                     value: { name: $statusName }
-                  }) {
-                    projectV2Item { id }
-                  }
+                  }) { projectV2Item { id } }
                 }
-              `;
-              await github.graphql(mutation, { projectId, itemId, statusFieldId, statusName });
+              `, { projectId, itemId, statusFieldId, statusName });
             }
 
-            async function getProjectItemId(issueNumber) {
-              const query = `
-                query ($projectId: ID!, $issueNumber: Int!) {
-                  organization(login: "SEU_ORG") {
-                    projectV2(number: $projectId) {
-                      items(query: $issueNumber) {
-                        nodes { id }
-                      }
-                    }
-                  }
-                }
-              `;
-              const res = await github.graphql(query, { projectId, issueNumber });
-              return res.organization.projectV2.items.nodes[0]?.id;
+            let itemId = null;
+
+            if (context.eventName === "create" && context.payload.ref_type === "branch") {
+              // Branch criada, tenta extrair número da issue
+              const branchName = context.payload.ref;
+              const issueNumber = extractIssueNumberFromBranch(branchName);
+              itemId = await getOrCreateItem(issueNumber);
+              if (itemId) await moveItem(itemId, "Em Desenvolvimento");
             }
 
-            let itemId;
-            if (context.payload.issue) {
-              itemId = await getProjectItemId(context.payload.issue.number);
-            } else if (context.payload.pull_request) {
-              itemId = await getProjectItemId(context.payload.pull_request.number);
-            } else {
-              return;
+            if (context.eventName === "issues") {
+              itemId = await getOrCreateItem(context.payload.issue.number);
+              if (!itemId) return;
+              if (context.payload.action === "opened") await moveItem(itemId, "Não Iniciado");
+              if (context.payload.action === "closed") await moveItem(itemId, "Em Testes");
             }
 
-            if (!itemId) return;
-
-            // Automação por evento
-            if (context.eventName === "issues" && context.payload.action === "opened") {
-              await moveIssueToStatus(itemId, "Não Iniciado");
-            }
-
-            if (context.eventName === "create") {
-              await moveIssueToStatus(itemId, "Em Desenvolvimento");
-            }
-
-            if (context.eventName === "issues" && context.payload.action === "closed") {
-              await moveIssueToStatus(itemId, "Em Testes");
-            }
-
-            if (context.eventName === "pull_request" && context.payload.action === "opened") {
-              await moveIssueToStatus(itemId, "Aguardando Atualização");
-            }
-
-            if (context.eventName === "pull_request" && context.payload.action === "closed" && context.payload.pull_request.merged) {
-              await moveIssueToStatus(itemId, "Atualizado (Concluído)");
+            if (context.eventName === "pull_request") {
+              itemId = await getOrCreateItem(context.payload.pull_request.number);
+              if (!itemId) return;
+              if (context.payload.action === "opened") await moveItem(itemId, "Aguardando Atualização");
+              if (context.payload.action === "closed" && context.payload.pull_request.merged) await moveItem(itemId, "Atualizado (Concluído)");
             }
