@@ -9,6 +9,144 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checar branch
+        run: |
+          echo "Branch: ${{ github.ref_name }}"
+
+      - name: Achar número da issue na branch
+        id: get_issue
+        run: |
+          BRANCH="${GITHUB_REF_NAME}"
+          ISSUE_NUMBER=$(echo "$BRANCH" | grep -oE '[0-9]+')
+          echo "issue_number=$ISSUE_NUMBER" >> $GITHUB_OUTPUT
+
+      - name: Atualizar ProjectV2
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GH_TOKEN }}
+          script: |
+            const issueNumber = parseInt("${{ steps.get_issue.outputs.issue_number }}");
+            const repo = "Repo-Test-DevOps";
+            const org = "Ambiente-de-Testes";
+            const projectId = "PVT_kwDODixzhM4BFb_a"; // ProjectV2
+            const statusFieldId = "PVTSSF_lADODixzhM4BFb_azg2xh6E"; // Campo Status
+            const statusNameToSet = "In Progress"; // Nome do status
+
+            // 1️⃣ Buscar Issue
+            const { repository } = await github.graphql(`
+              query ($org: String!, $repo: String!, $issueNumber: Int!) {
+                repository(owner: $org, name: $repo) {
+                  issue(number: $issueNumber) {
+                    id
+                    number
+                    title
+                  }
+                }
+              }
+            `, { org, repo, issueNumber });
+
+            if (!repository.issue) {
+              throw new Error(`Issue #${issueNumber} não encontrada!`);
+            }
+            const issueId = repository.issue.id;
+            console.log(`✅ Issue encontrada: #${issueNumber} - ${repository.issue.title}`);
+
+            // 2️⃣ Verificar se o item já existe no ProjectV2
+            const projectItemsRes = await github.graphql(`
+              query ($projectId: ID!) {
+                node(id: $projectId) {
+                  ... on ProjectV2 {
+                    items(first: 50) {
+                      nodes {
+                        id
+                        content {
+                          ... on Issue {
+                            id
+                            number
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            `, { projectId });
+
+            let item = projectItemsRes.node.items.nodes.find(n => n.content && n.content.number === issueNumber);
+            let itemId;
+
+            if (item) {
+              console.log("🧩 Item já existe no ProjectV2");
+              itemId = item.id;
+            } else {
+              // Criar item
+              const createItemRes = await github.graphql(`
+                mutation ($projectId: ID!, $contentId: ID!) {
+                  addProjectV2ItemById(input: {projectId: $projectId, contentId: $contentId}) {
+                    item {
+                      id
+                    }
+                  }
+                }
+              `, { projectId, contentId: issueId });
+              itemId = createItemRes.addProjectV2ItemById.item.id;
+              console.log(`🆕 Item criado no ProjectV2: ${itemId}`);
+            }
+
+            // 3️⃣ Buscar opções do campo Status
+            const fieldResult = await github.graphql(`
+              query ($projectId: ID!, $fieldId: ID!) {
+                node(id: $projectId) {
+                  ... on ProjectV2 {
+                    field(id: $fieldId) {
+                      ... on ProjectV2SingleSelectField {
+                        options {
+                          id
+                          name
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            `, { projectId, fieldId: statusFieldId });
+
+            const options = fieldResult.node.field.options;
+            const option = options.find(o => o.name === statusNameToSet);
+
+            if (!option) {
+              throw new Error(`Opção de status "${statusNameToSet}" não encontrada!`);
+            }
+
+            console.log(`🧩 Opção encontrada: ${option.name} (${option.id})`);
+
+            // 4️⃣ Atualizar status do item
+            await github.graphql(`
+              mutation ($projectId: ID!, $itemId: ID!, $fieldId: ID!, $valueId: String!) {
+                updateProjectV2ItemFieldValue(
+                  input: {
+                    projectId: $projectId,
+                    itemId: $itemId,
+                    fieldId: $fieldId,
+                    value: { singleSelectOptionId: $valueId }
+                  }
+                ) {
+                  projectV2Item { id }
+                }
+              }
+            `, { projectId, itemId, fieldId: statusFieldId, valueId: option.id });
+
+            console.log("✅ Status atualizado com sucesso!");
+name: Atualizar issue e project ao criar branch
+on:
+  push:
+    branches:
+      - '**'  # Dispara para qualquer branch
+
+jobs:
+  update_issue_project:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checar branch
         run: echo "Branch: ${{ github.ref_name }}"
 
       - name: Achar número da issue na branch
