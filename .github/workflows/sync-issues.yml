@@ -1,0 +1,43 @@
+name: Sync Issues to Target Repo
+
+on:
+  issues:
+    types: [opened, labeled]
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    if: github.event.action == 'opened' || github.event.action == 'labeled'
+
+    steps:
+      - name: Extract data
+        id: extract
+        run: |
+          echo "title=${{ github.event.issue.title }}" >> $GITHUB_OUTPUT
+          echo "body=${{ github.event.issue.body }}" >> $GITHUB_OUTPUT
+
+      - name: Determine target repo from label
+        id: target
+        run: |
+          # Obtém a label recém adicionada
+          LABEL_NAME="${{ github.event.label.name }}"
+          
+          # Caso a label não exista ainda (ex: issue recém criada)
+          if [ -z "$LABEL_NAME" ]; then
+            LABEL_NAME=$(echo "${{ github.event.issue.labels[0].name }}" | tr -d '[:space:]')
+          fi
+
+          echo "repo=$LABEL_NAME" >> $GITHUB_OUTPUT
+          echo "Destino: $LABEL_NAME"
+
+          - name: Create issue in target repository
+            run: |
+              curl -X POST \
+                -H "Authorization: token ${{ secrets.GH_TOKEN }}" \
+                -H "Accept: application/vnd.github.v3+json" \
+                https://api.github.com/repos/Ambiente-de-Testes/${{ steps.target.outputs.repo }}/issues \
+                -d '{
+                  "title": "${{ steps.extract.outputs.title }}",
+                  "body": "${{ steps.extract.outputs.body }}\n\n---\n_Origin: https://github.com/${{ github.repository }}/issues/${{ github.event.issue.number }}_"
+                }'
+
