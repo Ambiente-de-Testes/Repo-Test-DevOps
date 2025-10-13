@@ -7,7 +7,7 @@ on:
     types: [opened, closed]
   create:
     branches:
-      - '**'  # qualquer branch criada
+      - '**'
 
 jobs:
   update-project:
@@ -17,17 +17,18 @@ jobs:
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           script: |
-            const projectId = "PVT_kwDODixzhM4BFb_a"; // ProjectV2 ID
-            const statusFieldId = "PVTSSF_lADODixzhM4BFb_azg2xh6E"; // Field ID do Status
+            const projectId = "PVT_kwDODixzhM4BFb_a"; // ID do ProjectV2
+            const statusFieldId = "PVTSSF_lADODixzhM4BFb_azg2xh6E"; // ID do campo de Status
+            const org = "Ambiente-de-Testes"; // nome exato da organização
 
             async function moveIssueToStatus(itemId, statusName) {
               const mutation = `
                 mutation ($projectId: ID!, $itemId: ID!, $statusFieldId: ID!, $statusName: String!) {
-                  updateProjectV2ItemField(input: {
-                    projectId: $projectId,
-                    itemId: $itemId,
-                    fieldId: $statusFieldId,
-                    value: { name: $statusName }
+                  updateProjectV2ItemFieldValue(input: {
+                    projectId: $projectId
+                    itemId: $itemId
+                    fieldId: $statusFieldId
+                    value: { singleSelectOptionName: $statusName }
                   }) {
                     projectV2Item { id }
                   }
@@ -36,34 +37,48 @@ jobs:
               await github.graphql(mutation, { projectId, itemId, statusFieldId, statusName });
             }
 
-            async function getProjectItemId(issueNumber) {
+            async function getProjectItemId(issueNodeId) {
               const query = `
-                query ($projectId: ID!, $issueNumber: Int!) {
-                  organization(login: "SEU_ORG") {
-                    projectV2(number: $projectId) {
-                      items(query: $issueNumber) {
-                        nodes { id }
+                query ($org: String!, $projectId: ID!) {
+                  organization(login: $org) {
+                    projectV2(id: $projectId) {
+                      items(first: 100) {
+                        nodes {
+                          id
+                          content {
+                            ... on Issue { id number }
+                            ... on PullRequest { id number }
+                          }
+                        }
                       }
                     }
                   }
                 }
               `;
-              const res = await github.graphql(query, { projectId, issueNumber });
-              return res.organization.projectV2.items.nodes[0]?.id;
+              const res = await github.graphql(query, { org, projectId });
+              const items = res.organization.projectV2.items.nodes;
+              const item = items.find(i => i.content?.id === issueNodeId);
+              return item?.id;
             }
 
-            let itemId;
+            // Identifica o tipo de evento e pega o Node ID
+            let issueNodeId;
             if (context.payload.issue) {
-              itemId = await getProjectItemId(context.payload.issue.number);
+              issueNodeId = context.payload.issue.node_id;
             } else if (context.payload.pull_request) {
-              itemId = await getProjectItemId(context.payload.pull_request.number);
+              issueNodeId = context.payload.pull_request.node_id;
             } else {
+              console.log("Evento não relacionado a issue ou PR.");
               return;
             }
 
-            if (!itemId) return;
+            const itemId = await getProjectItemId(issueNodeId);
+            if (!itemId) {
+              console.log("Item não encontrado no projeto.");
+              return;
+            }
 
-            // Automação por evento
+            // Lógica de automação
             if (context.eventName === "issues" && context.payload.action === "opened") {
               await moveIssueToStatus(itemId, "Não Iniciado");
             }
@@ -83,3 +98,5 @@ jobs:
             if (context.eventName === "pull_request" && context.payload.action === "closed" && context.payload.pull_request.merged) {
               await moveIssueToStatus(itemId, "Atualizado (Concluído)");
             }
+
+            console.log("Status atualizado com sucesso!");
