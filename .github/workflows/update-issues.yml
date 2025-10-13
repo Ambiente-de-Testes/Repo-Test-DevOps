@@ -17,9 +17,9 @@ jobs:
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           script: |
-            const projectId = "PVT_kwDODixzhM4BFb_a"; // ID do ProjectV2
-            const statusFieldId = "PVTSSF_lADODixzhM4BFb_azg2xh6E"; // ID do campo de Status
-            const org = "Ambiente-de-Testes"; // nome exato da organização
+            const projectId = "PVT_kwDODixzhM4BFb_a";
+            const statusFieldId = "PVTSSF_lADODixzhM4BFb_azg2xh6E";
+            const org = "Ambiente-de-Testes";
 
             async function moveIssueToStatus(itemId, statusName) {
               const mutation = `
@@ -47,7 +47,6 @@ jobs:
                           id
                           content {
                             ... on Issue { id number }
-                            ... on PullRequest { id number }
                           }
                         }
                       }
@@ -61,14 +60,39 @@ jobs:
               return item?.id;
             }
 
-            // Identifica o tipo de evento e pega o Node ID
             let issueNodeId;
+
             if (context.payload.issue) {
               issueNodeId = context.payload.issue.node_id;
             } else if (context.payload.pull_request) {
               issueNodeId = context.payload.pull_request.node_id;
-            } else {
-              console.log("Evento não relacionado a issue ou PR.");
+            } else if (context.eventName === "create") {
+              const branchName = context.payload.ref;
+              console.log("Nova branch criada:", branchName);
+
+              // tenta extrair número da issue (ex: issue-39, 39-descricao)
+              const match = branchName.match(/(\d+)/);
+              if (match) {
+                const issueNumber = match[1];
+                console.log("Número da issue detectado:", issueNumber);
+
+                // busca o ID da issue
+                const issueData = await github.graphql(`
+                  query ($org: String!, $issueNumber: Int!) {
+                    organization(login: $org) {
+                      repository(name: "Repo-Test-DevOps") {
+                        issue(number: $issueNumber) { id node_id }
+                      }
+                    }
+                  }
+                `, { org, issueNumber });
+
+                issueNodeId = issueData.organization.repository.issue.node_id;
+              }
+            }
+
+            if (!issueNodeId) {
+              console.log("Nenhuma issue encontrada no evento atual.");
               return;
             }
 
@@ -78,23 +102,18 @@ jobs:
               return;
             }
 
-            // Lógica de automação
             if (context.eventName === "issues" && context.payload.action === "opened") {
               await moveIssueToStatus(itemId, "Não Iniciado");
             }
-
             if (context.eventName === "create") {
               await moveIssueToStatus(itemId, "Em Desenvolvimento");
             }
-
             if (context.eventName === "issues" && context.payload.action === "closed") {
               await moveIssueToStatus(itemId, "Em Testes");
             }
-
             if (context.eventName === "pull_request" && context.payload.action === "opened") {
               await moveIssueToStatus(itemId, "Aguardando Atualização");
             }
-
             if (context.eventName === "pull_request" && context.payload.action === "closed" && context.payload.pull_request.merged) {
               await moveIssueToStatus(itemId, "Atualizado (Concluído)");
             }
