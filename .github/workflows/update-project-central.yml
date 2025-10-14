@@ -11,23 +11,12 @@ jobs:
       - name: Log evento recebido
         run: |
           echo "📡 Evento recebido de outro repositório"
-          echo "   Repositório: ${{ github.event.client_payload.repository }}"
+          echo "   Repositório origem (onde a branch foi criada): ${{ github.event.client_payload.repository }}"
           echo "   Branch: ${{ github.event.client_payload.branch }}"
           echo "   Issue: #${{ github.event.client_payload.issue_number }}"
-          echo "   Sender: ${{ github.event.client_payload.sender }}"
-          
-      - name: Validar payload
-        id: validate
-        run: |
-          if [ -z "${{ github.event.client_payload.issue_number }}" ]; then
-            echo "❌ Nenhum número de issue fornecido"
-            echo "valid=false" >> $GITHUB_OUTPUT
-            exit 0
-          fi
-          echo "valid=true" >> $GITHUB_OUTPUT
+          echo "   Issue Repository: ${{ github.event.client_payload.issue_repository }}"
           
       - name: Update Project Status
-        if: steps.validate.outputs.valid == 'true'
         uses: actions/github-script@v7
         with:
           github-token: ${{ secrets.DEVOPS_TOKEN }}
@@ -38,21 +27,28 @@ jobs:
             
             const payload = context.payload.client_payload;
             const issueNumber = payload.issue_number;
-            const repoFullName = payload.repository;
-            const [owner, repo] = repoFullName.split('/');
             
-            console.log(`🔍 Processando issue #${issueNumber} de ${owner}/${repo}`);
+            // IMPORTANTE: A issue está no repositório DevOps, não no repositório onde a branch foi criada
+            const issueRepo = payload.issue_repository || 'Ambiente-de-Testes/Repo-Test-DevOps';
+            const [issueOwner, issueRepoName] = issueRepo.split('/');
+            
+            // Repositório onde a branch foi criada (para referência)
+            const branchRepo = payload.repository;
+            
+            console.log(`🔍 Branch criada em: ${branchRepo}`);
+            console.log(`📋 Issue #${issueNumber} localizada em: ${issueRepo}`);
 
             try {
-              // 1. Busca a issue
-              console.log(`📥 Buscando issue #${issueNumber}...`);
+              // 1. Busca a issue NO REPOSITÓRIO CORRETO (DevOps)
+              console.log(`📥 Buscando issue #${issueNumber} em ${issueRepo}...`);
               const { data: issue } = await github.rest.issues.get({
-                owner,
-                repo,
+                owner: issueOwner,
+                repo: issueRepoName,
                 issue_number: issueNumber
               });
               console.log(`✅ Issue encontrada: "${issue.title}"`);
               console.log(`   Node ID: ${issue.node_id}`);
+              console.log(`   URL: ${issue.html_url}`);
               const issueNodeId = issue.node_id;
 
               // 2. Busca o projeto e seus itens
@@ -89,13 +85,6 @@ jobs:
               const projectData = await github.graphql(projectQuery, { projectId });
               const items = projectData.node.items.nodes;
               console.log(`📋 Total de itens no projeto: ${items.length}`);
-              
-              // Log de debug dos itens
-              items.forEach(item => {
-                if (item.content) {
-                  console.log(`   - Issue #${item.content.number} (${item.content.repository.nameWithOwner}): ID=${item.content.id}`);
-                }
-              });
 
               // 3. Encontra o item correspondente
               const projectItem = items.find(i => i.content?.id === issueNodeId);
@@ -132,6 +121,8 @@ jobs:
               });
               
               console.log(`🎉 Status atualizado com sucesso!`);
+              console.log(`   Issue #${issueNumber} movida para "Em Desenvolvimento"`);
+              console.log(`   Trigger: Branch "${payload.branch}" criada em ${branchRepo}`);
               
             } catch (error) {
               console.error(`❌ Erro: ${error.message}`);
