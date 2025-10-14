@@ -1,4 +1,4 @@
-name: Sync Issues to Target Repo
+name: Recreate Issues on Target Repo
 
 on:
   issues:
