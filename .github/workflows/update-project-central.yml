@@ -23,26 +23,16 @@ jobs:
             const statusFieldId = "PVTSSF_lADODixzhM4BFb_azg2xh6E";
             const STATUS_EM_DESENVOLVIMENTO = "823324b0";
             
-            // Dados vindos do outro repositório
+            // Dados do payload
             const payload = context.payload.client_payload;
             const issueNumber = payload.issue_number;
             const repoFullName = payload.repository;
             const [owner, repo] = repoFullName.split('/');
-            
+
             console.log(`🔍 Processando issue #${issueNumber} de ${owner}/${repo}`);
-            
+
             try {
-              // Busca a issue no repositório de origem
-              const { data: issue } = await github.rest.issues.get({
-                owner: owner,
-                repo: repo,
-                issue_number: issueNumber
-              });
-              
-              console.log(`✅ Issue encontrada: #${issue.number} - ${issue.title}`);
-              const issueNodeId = issue.node_id;
-              
-              // Busca no projeto
+              // Busca todos os items do projeto
               const projectQuery = `
                 query ($projectId: ID!) {
                   node(id: $projectId) {
@@ -52,8 +42,7 @@ jobs:
                         nodes {
                           id
                           content {
-                            ... on Issue { id number title }
-                            ... on PullRequest { id number title }
+                            ... on Issue { id number repository { name owner { login } } title }
                           }
                         }
                       }
@@ -64,15 +53,23 @@ jobs:
               
               const projectData = await github.graphql(projectQuery, { projectId });
               const items = projectData.node.items.nodes;
-              const projectItem = items.find(i => i.content?.id === issueNodeId);
-              
+
+              // Agora busca o item pelo número da issue E pelo repo
+              const projectItem = items.find(i =>
+                i.content &&
+                i.content.number == issueNumber &&
+                i.content.repository &&
+                i.content.repository.name === repo &&
+                i.content.repository.owner.login === owner
+              );
+
               if (!projectItem) {
-                console.log(`⚠️ Issue #${issueNumber} não está no projeto`);
+                console.log(`⚠️ Issue #${issueNumber} não está no projeto central`);
                 return;
               }
-              
-              console.log(`✅ Item encontrado no projeto`);
-              
+
+              console.log(`✅ Item encontrado no projeto!`);
+
               // Atualiza status
               const updateMutation = `
                 mutation ($projectId: ID!, $itemId: ID!, $fieldId: ID!, $value: String!) {
@@ -93,9 +90,9 @@ jobs:
                 fieldId: statusFieldId,
                 value: STATUS_EM_DESENVOLVIMENTO
               });
-              
+
               console.log(`🎉 Issue #${issueNumber} movida para "Em Desenvolvimento"!`);
-              
+
             } catch (error) {
               console.error(`❌ Erro: ${error.message}`);
               throw error;
