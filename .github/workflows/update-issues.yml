@@ -1,272 +1,125 @@
 name: Update Issues on Private Repos
 
 on:
-  issues:
-    types: [opened, closed]
-  pull_request:
-    types: [opened, closed]
   create:
 
 jobs:
   update-project:
     runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      issues: read
-      pull-requests: read
+    # Só executa se for uma branch
+    if: github.event.ref_type == 'branch'
+    
     steps:
       - uses: actions/github-script@v7
         with:
-          github-token: ${{ secrets.GH_TOKEN }}
+          github-token: ${{ secrets.UPDATE_TOKEN }}
           script: |
             const projectId = "PVT_kwDODixzhM4BFb_a";
             const statusFieldId = "PVTSSF_lADODixzhM4BFb_azg2xh6E";
-            const org = "Ambiente-de-Testes";
-            const repoName = "Repo-Test-DevOps";
+            
+            // ⚠️ IMPORTANTE: Você precisa dos IDs dos status, não os nomes
+            // Vamos buscar primeiro e depois você ajusta
+            const STATUS_EM_DESENVOLVIMENTO = "823324b0"; // Substitua pelo ID real
 
-            async function moveIssueToStatus(itemId, statusName) {
-              try {
-                const mutation = `
-                  mutation ($projectId: ID!, $itemId: ID!, $statusFieldId: ID!, $statusName: String!) {
-                    updateProjectV2ItemFieldValue(input: {
-                      projectId: $projectId
-                      itemId: $itemId
-                      fieldId: $statusFieldId
-                      value: { 
-                        singleSelectOptionId: $statusName 
-                      }
-                    }) {
-                      projectV2Item { 
-                        id 
-                      }
-                    }
-                  }
-                `;
-                
-                const result = await github.graphql(mutation, { 
-                  projectId, 
-                  itemId, 
-                  statusFieldId, 
-                  statusName 
-                });
-                
-                console.log(`✅ Status atualizado para: ${statusName}`);
-                return result;
-              } catch (error) {
-                console.error("❌ Erro ao atualizar status:", error.message);
-                throw error;
-              }
+            console.log(`🌿 Branch criada: ${context.payload.ref}`);
+            
+            // Extrai número da issue/PR do nome da branch
+            const branchName = context.payload.ref;
+            const match = branchName.match(/(\d+)/);
+            
+            if (!match) {
+              console.log("⚠️ Nenhum número de issue encontrado na branch");
+              console.log(`💡 Use padrões como: 33-descricao, issue-33, feature/33-nome`);
+              return;
             }
-
-            async function getProjectItemId(contentNodeId) {
-              try {
-                const query = `
-                  query ($projectId: ID!) {
-                    node(id: $projectId) {
-                      ... on ProjectV2 {
-                        items(first: 100) {
-                          nodes {
-                            id
-                            content {
-                              ... on Issue { 
-                                id 
-                                number
-                                title
-                              }
-                              ... on PullRequest {
-                                id
-                                number
-                                title
-                              }
+            
+            const issueNumber = parseInt(match[1], 10);
+            console.log(`🔍 Issue #${issueNumber} detectada`);
+            
+            // Busca a issue via REST API
+            try {
+              const { data: issue } = await github.rest.issues.get({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: issueNumber
+              });
+              
+              console.log(`✅ Issue encontrada: #${issue.number} - ${issue.title}`);
+              const issueNodeId = issue.node_id;
+              
+              // Busca o item no projeto
+              console.log(`\n🔍 Buscando no projeto...`);
+              const projectQuery = `
+                query ($projectId: ID!) {
+                  node(id: $projectId) {
+                    ... on ProjectV2 {
+                      title
+                      items(first: 100) {
+                        nodes {
+                          id
+                          content {
+                            ... on Issue { 
+                              id 
+                              number
+                              title
+                            }
+                            ... on PullRequest {
+                              id
+                              number
+                              title
                             }
                           }
                         }
                       }
                     }
                   }
-                `;
-                
-                const res = await github.graphql(query, { projectId });
-                const items = res.node.items.nodes;
-                const item = items.find(i => i.content?.id === contentNodeId);
-                
-                if (item) {
-                  console.log(`✅ Item encontrado no projeto: ${item.content.title}`);
-                } else {
-                  console.log("⚠️ Item não encontrado no projeto. O item precisa ser adicionado ao projeto primeiro.");
                 }
-                
-                return item?.id;
-              } catch (error) {
-                console.error("❌ Erro ao buscar item do projeto:", error.message);
-                throw error;
-              }
-            }
-
-            async function findIssueOrPR(number) {
-              // Tenta buscar como Issue primeiro
-              try {
-                const issueQuery = `
-                  query ($owner: String!, $repo: String!, $number: Int!) {
-                    repository(owner: $owner, name: $repo) {
-                      issue(number: $number) { 
-                        id
-                        number
-                        title
-                        state
-                      }
-                    }
-                  }
-                `;
-                
-                const issueData = await github.graphql(issueQuery, { 
-                  owner: org,
-                  repo: repoName,
-                  number: number
-                });
-
-                if (issueData?.repository?.issue) {
-                  console.log(`✅ Issue encontrada: #${number} - ${issueData.repository.issue.title}`);
-                  return {
-                    type: 'issue',
-                    nodeId: issueData.repository.issue.id,
-                    data: issueData.repository.issue
-                  };
-                }
-              } catch (issueError) {
-                console.log(`ℹ️ Não é uma issue, tentando como PR...`);
-              }
-
-              // Se não for issue, tenta como PR
-              try {
-                const prQuery = `
-                  query ($owner: String!, $repo: String!, $number: Int!) {
-                    repository(owner: $owner, name: $repo) {
-                      pullRequest(number: $number) { 
-                        id
-                        number
-                        title
-                        state
-                      }
-                    }
-                  }
-                `;
-                
-                const prData = await github.graphql(prQuery, { 
-                  owner: org,
-                  repo: repoName,
-                  number: number
-                });
-
-                if (prData?.repository?.pullRequest) {
-                  console.log(`✅ PR encontrado: #${number} - ${prData.repository.pullRequest.title}`);
-                  return {
-                    type: 'pr',
-                    nodeId: prData.repository.pullRequest.id,
-                    data: prData.repository.pullRequest
-                  };
-                }
-              } catch (prError) {
-                console.log(`❌ Não é um PR válido`);
-              }
-
-              return null;
-            }
-
-            let issueNodeId;
-            let eventType = "";
-
-            // Detectar tipo de evento e obter node_id
-            if (context.payload.issue) {
-              issueNodeId = context.payload.issue.node_id;
-              eventType = `issue_${context.payload.action}`;
-              console.log(`📋 Issue #${context.payload.issue.number} - ${context.payload.action}`);
-            } else if (context.payload.pull_request) {
-              issueNodeId = context.payload.pull_request.node_id;
-              eventType = `pr_${context.payload.action}`;
-              console.log(`🔀 PR #${context.payload.pull_request.number} - ${context.payload.action}`);
-            } else if (context.eventName === "create" && context.payload.ref_type === "branch") {
-              const branchName = context.payload.ref;
-              console.log(`🌿 Nova branch criada: ${branchName}`);
-
-              // Tenta extrair número da issue/PR (ex: issue-39, 39-descricao, feature/39-nome)
-              const match = branchName.match(/(\d+)/);
+              `;
               
-              if (match) {
-                const itemNumber = parseInt(match[1], 10);
-                console.log(`🔍 Número detectado: ${itemNumber}`);
-
-                const found = await findIssueOrPR(itemNumber);
-                
-                if (found) {
-                  issueNodeId = found.nodeId;
-                  eventType = "branch_created";
-                } else {
-                  console.log(`⚠️ Item #${itemNumber} não encontrado no repositório ${org}/${repoName}`);
-                  console.log(`💡 Verifique se:`);
-                  console.log(`   - A issue/PR existe`);
-                  console.log(`   - O número no nome da branch está correto`);
-                  console.log(`   - O workflow tem permissões adequadas`);
-                }
-              } else {
-                console.log("⚠️ Nenhum número de issue/PR encontrado no nome da branch");
-                console.log(`💡 Padrões suportados: 33-nome, issue-33, feature/33-nome`);
+              const projectData = await github.graphql(projectQuery, { projectId });
+              console.log(`✅ Projeto acessado: ${projectData.node.title}`);
+              
+              const items = projectData.node.items.nodes;
+              const projectItem = items.find(i => i.content?.id === issueNodeId);
+              
+              if (!projectItem) {
+                console.log(`⚠️ Issue #${issueNumber} não está no projeto`);
+                console.log(`💡 Adicione manualmente ou use actions/add-to-project`);
+                return;
               }
-            }
-
-            if (!issueNodeId) {
-              console.log("⚠️ Nenhuma issue ou PR identificada no evento atual.");
-              return;
-            }
-
-            const itemId = await getProjectItemId(issueNodeId);
-            
-            if (!itemId) {
-              console.log("⚠️ Item não encontrado no projeto.");
-              console.log(`💡 Para adicionar automaticamente ao projeto, adicione este step antes:`);
-              console.log(`
-              - name: Add to project
-                uses: actions/add-to-project@v0.5.0
-                with:
-                  project-url: https://github.com/orgs/${org}/projects/[NUMERO]
-                  github-token: \${{ secrets.PROJECT_TOKEN }}
-              `);
-              return;
-            }
-
-            // Mapeamento de status
-            let targetStatus = null;
-
-            if (context.eventName === "issues" && context.payload.action === "opened") {
-              targetStatus = "Não Iniciado";
-              console.log("📌 Ação: Issue aberta → Não Iniciado");
-            }
-            
-            if (eventType === "branch_created") {
-              targetStatus = "Em Desenvolvimento";
-              console.log("🔨 Ação: Branch criada → Em Desenvolvimento");
-            }
-            
-            if (context.eventName === "issues" && context.payload.action === "closed") {
-              targetStatus = "Em Testes";
-              console.log("🧪 Ação: Issue fechada → Em Testes");
-            }
-            
-            if (context.eventName === "pull_request" && context.payload.action === "opened") {
-              targetStatus = "Aguardando Atualização";
-              console.log("⏳ Ação: PR aberto → Aguardando Atualização");
-            }
-            
-            if (context.eventName === "pull_request" && 
-                context.payload.action === "closed" && 
-                context.payload.pull_request.merged) {
-              targetStatus = "Atualizado (Concluído)";
-              console.log("✅ Ação: PR merged → Atualizado (Concluído)");
-            }
-
-            if (targetStatus) {
-              await moveIssueToStatus(itemId, targetStatus);
-              console.log("🎉 Workflow concluído com sucesso!");
-            } else {
-              console.log("⚠️ Nenhuma ação de atualização necessária para este evento");
+              
+              console.log(`✅ Item encontrado no projeto`);
+              
+              // Atualiza o status
+              console.log(`\n🔄 Movendo para "Em Desenvolvimento"...`);
+              
+              const updateMutation = `
+                mutation ($projectId: ID!, $itemId: ID!, $fieldId: ID!, $value: String!) {
+                  updateProjectV2ItemFieldValue(input: {
+                    projectId: $projectId
+                    itemId: $itemId
+                    fieldId: $fieldId
+                    value: { 
+                      singleSelectOptionId: $value 
+                    }
+                  }) {
+                    projectV2Item {
+                      id
+                    }
+                  }
+                }
+              `;
+              
+              await github.graphql(updateMutation, {
+                projectId: projectId,
+                itemId: projectItem.id,
+                fieldId: statusFieldId,
+                value: STATUS_EM_DESENVOLVIMENTO
+              });
+              
+              console.log(`🎉 Status atualizado com sucesso!`);
+              
+            } catch (error) {
+              console.error(`❌ Erro: ${error.message}`);
+              throw error;
             }
