@@ -1,120 +1,125 @@
-name: Update Project Status
+name: Update Issues on Private Repos
 
 on:
-  push:
+  issues:
+    types: [opened, closed]
+  pull_request:
+    types: [opened, closed]
+  create:
     branches:
-      - "*-teste-*"
+      - '**'
 
 jobs:
-  update-project-status:
+  update-project:
     runs-on: ubuntu-latest
     steps:
-      - name: Extrair número da issue a partir da branch
-        id: extract
-        run: |
-          BRANCH_NAME="${GITHUB_REF#refs/heads/}"
-          echo "Branch atual: $BRANCH_NAME"
-          ISSUE_NUMBER=$(echo "$BRANCH_NAME" | grep -oE '^[0-9]+')
-          if [ -z "$ISSUE_NUMBER" ]; then
-            echo "❌ Nenhum número de issue encontrado na branch."
-            exit 1
-          fi
-          echo "Número da issue detectado: $ISSUE_NUMBER"
-          echo "issue_number=$ISSUE_NUMBER" >> $GITHUB_OUTPUT
-
-      - name: Atualizar status no GitHub Project
-        uses: actions/github-script@v7
+      - uses: actions/github-script@v7
         with:
-          github-token: ${{ secrets.PAT_PROJECT }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
           script: |
-            const issueNumber = parseInt('${{ steps.extract.outputs.issue_number }}');
-            const projectId = "PVT_kwDODixzhM4BFb_a"; // Substitua pelo ID do seu ProjectV2
-            const statusFieldId = "PVTSSF_lADODixzhM4BFb_azg2xh6E"; // Substitua pelo ID do campo "Status"
-            const newStatus = "Em andamento"; // Valor que deseja aplicar
+            const projectId = "PVT_kwDODixzhM4BFb_a"; // ID do ProjectV2
+            const statusFieldId = "PVTSSF_lADODixzhM4BFb_azg2xh6E"; // ID do campo de Status
+            const org = "Ambiente-de-Testes";
+            const repo = "Repo-Test-DevOps";
 
-            console.log(`🪶 Atualizando issue #${issueNumber} no projeto ${projectId}`);
-
-            // 1️⃣ Buscar issue
-            const { repository } = await github.graphql(
-              `
-              query($owner:String!, $repo:String!, $issueNumber:Int!) {
-                repository(owner:$owner, name:$repo) {
-                  issue(number:$issueNumber) {
-                    id
-                    title
+            async function moveIssueToStatus(itemId, statusName) {
+              const mutation = `
+                mutation ($projectId: ID!, $itemId: ID!, $statusFieldId: ID!, $statusName: String!) {
+                  updateProjectV2ItemFieldValue(input: {
+                    projectId: $projectId
+                    itemId: $itemId
+                    fieldId: $statusFieldId
+                    value: { singleSelectOptionName: $statusName }
+                  }) {
+                    projectV2Item { id }
                   }
                 }
-              }
-              `,
-              {
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                issueNumber
-              }
-            );
-
-            const issue = repository?.issue;
-            if (!issue) {
-              core.setFailed(`❌ Issue #${issueNumber} não encontrada no repositório.`);
-              return;
+              `;
+              await github.graphql(mutation, { projectId, itemId, statusFieldId, statusName });
             }
 
-            console.log(`📌 Issue encontrada: ${issue.title} (${issue.id})`);
-
-            // 2️⃣ Buscar o item do projeto vinculado a essa issue
-            const projectItems = await github.graphql(
-              `
-              query($projectId:ID!, $issueId:ID!) {
-                node(id:$projectId) {
-                  ... on ProjectV2 {
-                    items(first:100) {
-                      nodes {
-                        id
-                        content {
-                          ... on Issue { id }
+            async function getProjectItemId(issueId) {
+              const query = `
+                query ($org: String!, $projectId: ID!) {
+                  organization(login: $org) {
+                    projectV2(id: $projectId) {
+                      items(first: 100) {
+                        nodes {
+                          id
+                          content {
+                            ... on Issue { id number }
+                          }
                         }
                       }
                     }
                   }
                 }
+              `;
+              const res = await github.graphql(query, { org, projectId });
+              const items = res.organization.projectV2.items.nodes;
+              const item = items.find(i => i.content?.id === issueId);
+              return item?.id;
+            }
+
+            let issueId;
+
+            if (context.payload.issue) {
+              issueId = context.payload.issue.node_id; // node_id da REST, funciona para eventos de issues
+            } else if (context.payload.pull_request) {
+              issueId = context.payload.pull_request.node_id;
+            } else if (context.eventName === "create") {
+              const branchName = context.payload.ref;
+              console.log("Nova branch criada:", branchName);
+
+              // Tenta extrair número da issue (ex: issue-39, 39-teste, feature/39)
+              const match = branchName.match(/(\d+)/);
+              if (match) {
+                const issueNumber = parseInt(match[1]);
+                console.log("Número da issue detectado:", issueNumber);
+
+                // busca o ID da issue via GraphQL
+                const query = `
+                  query ($org: String!, $repo: String!, $issueNumber: Int!) {
+                    organization(login: $org) {
+                      repository(name: $repo) {
+                        issue(number: $issueNumber) { id number title }
+                      }
+                    }
+                  }
+                `;
+                const data = await github.graphql(query, { org, repo, issueNumber });
+                issueId = data.organization.repository.issue.id;
+                console.log("ID da issue encontrado:", issueId);
+              } else {
+                console.log("Nenhum número de issue detectado no nome da branch.");
               }
-              `,
-              { projectId, issueId: issue.id }
-            );
+            }
 
-            const projectItem = projectItems.node.items.nodes.find(i => i.content?.id === issue.id);
-
-            if (!projectItem) {
-              core.setFailed(`❌ A issue #${issueNumber} não está vinculada ao projeto.`);
+            if (!issueId) {
+              console.log("Nenhuma issue encontrada no evento atual.");
               return;
             }
 
-            console.log(`✅ Item do projeto encontrado: ${projectItem.id}`);
+            const itemId = await getProjectItemId(issueId);
+            if (!itemId) {
+              console.log("Item não encontrado no projeto.");
+              return;
+            }
 
-            // 3️⃣ Atualizar o campo de status
-            await github.graphql(
-              `
-              mutation($projectId:ID!, $itemId:ID!, $fieldId:ID!, $value:String!) {
-                updateProjectV2ItemFieldValue(
-                  input: {
-                    projectId:$projectId
-                    itemId:$itemId
-                    fieldId:$fieldId
-                    value:{ singleSelectOptionName:$value }
-                  }
-                ) {
-                  projectV2Item {
-                    id
-                  }
-                }
-              }
-              `,
-              {
-                projectId,
-                itemId: projectItem.id,
-                fieldId: statusFieldId,
-                value: newStatus
-              }
-            );
+            if (context.eventName === "issues" && context.payload.action === "opened") {
+              await moveIssueToStatus(itemId, "Não Iniciado");
+            }
+            if (context.eventName === "create") {
+              await moveIssueToStatus(itemId, "Em Desenvolvimento");
+            }
+            if (context.eventName === "issues" && context.payload.action === "closed") {
+              await moveIssueToStatus(itemId, "Em Testes");
+            }
+            if (context.eventName === "pull_request" && context.payload.action === "opened") {
+              await moveIssueToStatus(itemId, "Aguardando Atualização");
+            }
+            if (context.eventName === "pull_request" && context.payload.action === "closed" && context.payload.pull_request.merged) {
+              await moveIssueToStatus(itemId, "Atualizado (Concluído)");
+            }
 
-            console.log(`🎯 Status da issue #${issueNumber} atualizado para "${newStatus}" com sucesso!`);
+            console.log("Status atualizado com sucesso!");
