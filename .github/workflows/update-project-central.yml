@@ -17,7 +17,7 @@ jobs:
           
       - uses: actions/github-script@v7
         with:
-          github-token: ${{ secrets.DEVSTATUS_TOKEN }}
+          github-token: ${{ secrets.DEVOPS_TOKEN }}
           script: |
             const projectId = "PVT_kwDODixzhM4BFb_a";
             const statusFieldId = "PVTSSF_lADODixzhM4BFb_azg2xh6E";
@@ -28,21 +28,30 @@ jobs:
             const issueNumber = payload.issue_number;
             const repoFullName = payload.repository;
             const [owner, repo] = repoFullName.split('/');
-
             console.log(`🔍 Processando issue #${issueNumber} de ${owner}/${repo}`);
 
             try {
-              // Busca todos os items do projeto
+              // Busca a issue via REST API no repo de origem
+              const { data: issue } = await github.rest.issues.get({
+                owner,
+                repo,
+                issue_number: issueNumber
+              });
+              console.log(`✅ Issue encontrada: #${issue.number} - ${issue.title}`);
+              const issueNodeId = issue.node_id;
+
+              // Busca o item no projeto central
               const projectQuery = `
                 query ($projectId: ID!) {
                   node(id: $projectId) {
                     ... on ProjectV2 {
                       title
-                      items(first: 100) {
+                      items(first: 500) {
                         nodes {
                           id
                           content {
-                            ... on Issue { id number repository { name owner { login } } title }
+                            ... on Issue { id number title }
+                            ... on PullRequest { id number title }
                           }
                         }
                       }
@@ -50,27 +59,17 @@ jobs:
                   }
                 }
               `;
-              
               const projectData = await github.graphql(projectQuery, { projectId });
               const items = projectData.node.items.nodes;
-
-              // Agora busca o item pelo número da issue E pelo repo
-              const projectItem = items.find(i =>
-                i.content &&
-                i.content.number == issueNumber &&
-                i.content.repository &&
-                i.content.repository.name === repo &&
-                i.content.repository.owner.login === owner
-              );
+              const projectItem = items.find(i => i.content?.id === issueNodeId);
 
               if (!projectItem) {
-                console.log(`⚠️ Issue #${issueNumber} não está no projeto central`);
+                console.log(`⚠️ Issue #${issueNumber} não está no projeto`);
                 return;
               }
+              console.log(`✅ Item encontrado no projeto`);
 
-              console.log(`✅ Item encontrado no projeto!`);
-
-              // Atualiza status
+              // Atualiza o status
               const updateMutation = `
                 mutation ($projectId: ID!, $itemId: ID!, $fieldId: ID!, $value: String!) {
                   updateProjectV2ItemFieldValue(input: {
@@ -83,16 +82,13 @@ jobs:
                   }
                 }
               `;
-              
               await github.graphql(updateMutation, {
                 projectId,
                 itemId: projectItem.id,
                 fieldId: statusFieldId,
                 value: STATUS_EM_DESENVOLVIMENTO
               });
-
-              console.log(`🎉 Issue #${issueNumber} movida para "Em Desenvolvimento"!`);
-
+              console.log(`🎉 Status atualizado com sucesso!`);
             } catch (error) {
               console.error(`❌ Erro: ${error.message}`);
               throw error;
