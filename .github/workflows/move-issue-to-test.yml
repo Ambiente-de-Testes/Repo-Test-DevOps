@@ -17,13 +17,13 @@ jobs:
           echo "PR: ${{ github.event.pull_request.html_url }}"
           if [ -n "$ISSUE_NUM" ]; then
             echo "issue_number=$ISSUE_NUM" >> $GITHUB_OUTPUT
-            echo "Issue referenciada: #$ISSUE_NUM"
+            echo "✅ Issue referenciada: #$ISSUE_NUM"
           else
-            echo " Nenhum número de issue referenciado no PR"
+            echo "⚠️ Nenhum número de issue referenciado no PR"
             echo "issue_number=" >> $GITHUB_OUTPUT
           fi
 
-      - name: Update Project Status
+      - name: Update Project Status (by Title from DevOps)
         if: steps.extract.outputs.issue_number != ''
         uses: actions/github-script@v7
         with:
@@ -31,80 +31,69 @@ jobs:
           script: |
             const projectId = "PVT_kwDODixzhM4BFb_a";
             const statusFieldId = "PVTSSF_lADODixzhM4BFb_azg2xh6E";
-            const STATUS_EM_TESTE = "47fc9ee4"; // 
+            const STATUS_EM_TESTE = "47fc9ee4"; // Atualize conforme seu projeto
 
-            const issueNumber = ${{ steps.extract.outputs.issue_number }};
-            const prNumber = context.payload.pull_request.number;
-            const prUrl = context.payload.pull_request.html_url;
-            const branchRepo = context.repo.owner + '/' + context.repo.repo;
+            // Número da issue do clone local (repo de código)
+            const codeIssueNumber = ${{ steps.extract.outputs.issue_number }};
+            const codeRepoOwner = context.repo.owner;
+            const codeRepoName = context.repo.repo;
 
-            // Repositórios para buscar a issue
-            const reposToSearch = [
-              { owner: 'Ambiente-de-Testes', repo: 'Repo-Test-DevOps' },
-              { owner: context.repo.owner, repo: context.repo.repo }
-            ];
+            // Busca a issue clonada no repo de código
+            const { data: clonedIssue } = await github.rest.issues.get({
+              owner: codeRepoOwner,
+              repo: codeRepoName,
+              issue_number: codeIssueNumber
+            });
 
-            // Remove duplicatas
-            const uniqueRepos = reposToSearch.filter((repo, index, self) =>
-              index === self.findIndex(r => r.owner === repo.owner && r.repo === repo.repo)
-            );
+            // Busca TODAS issues abertas no DevOps (pode paginar se tiver muitas)
+            let devopsIssues = [];
+            let page = 1;
+            let found = false;
+            while (!found) {
+              const { data: issuesPage } = await github.rest.issues.listForRepo({
+                owner: 'Ambiente-de-Testes',
+                repo: 'Repo-Test-DevOps',
+                state: 'open',
+                per_page: 100,
+                page: page
+              });
+              devopsIssues = devopsIssues.concat(issuesPage);
+              // Se menos de 100 vieram, acabou
+              if (issuesPage.length < 100) found = true;
+              page++;
+            }
 
-            let issue = null;
-            let issueOwner = null;
-            let issueRepo = null;
+            // Procura a issue original pelo título
+            const originalIssue = devopsIssues.find(i => i.title === clonedIssue.title);
 
-            try {
-              // 1. Procura a issue em cada repositório
-              for (const repo of uniqueRepos) {
-                try {
-                  console.log(`   Tentando ${repo.owner}/${repo.repo}...`);
-                  const { data: foundIssue } = await github.rest.issues.get({
-                    owner: repo.owner,
-                    repo: repo.repo,
-                    issue_number: issueNumber
-                  });
-                  issue = foundIssue;
-                  issueOwner = repo.owner;
-                  issueRepo = repo.repo;
-                  console.log(`Issue encontrada em ${issueOwner}/${issueRepo}!`);
-                  console.log(`Título: "${issue.title}"`);
-                  console.log(`URL: ${issue.html_url}`);
-                  break;
-                } catch (err) {
-                  if (err.status === 404) {
-                    console.log(`Não encontrada em ${repo.owner}/${repo.repo}`);
-                  } else {
-                    throw err;
-                  }
-                }
-              }
+            if (!originalIssue) {
+              console.log('❌ Issue original não encontrada no DevOps!');
+              return;
+            }
 
-              if (!issue) {
-                console.log(`Issue #${issueNumber} não encontrada em nenhum repositório`);
-                return;
-              }
+            console.log(`✅ Issue original encontrada: #${originalIssue.number} - ${originalIssue.title}`);
+            console.log(`🔗 ${originalIssue.html_url}`);
+            const issueNodeId = originalIssue.node_id;
 
-              const issueNodeId = issue.node_id;
+            // 2. Busca todos os itens do projeto (com paginação)
+            let items = [];
+            let cursor = null;
+            let hasNextPage = true;
 
-              // 2. Busca o projeto e seus itens
-              console.log(`Buscando itens do projeto...`);
+            while (hasNextPage) {
               const projectQuery = `
-                query ($projectId: ID!) {
+                query ($projectId: ID!, $after: String) {
                   node(id: $projectId) {
                     ... on ProjectV2 {
-                      title
-                      items(first: 100) {
+                      items(first: 100, after: $after) {
+                        pageInfo {
+                          hasNextPage
+                          endCursor
+                        }
                         nodes {
                           id
                           content {
-                            ... on Issue { 
-                              id 
-                              number 
-                              title
-                              repository {
-                                nameWithOwner
-                              }
-                            }
+                            ... on Issue { id number title }
                           }
                         }
                       }
@@ -112,64 +101,59 @@ jobs:
                   }
                 }
               `;
-              
-              const projectData = await github.graphql(projectQuery, { projectId });
-              const items = projectData.node.items.nodes;
-              console.log(`Projeto: ${projectData.node.title}`);
-              console.log(`Total de itens: ${items.length}`);
+              const projectData = await github.graphql(projectQuery, { projectId, after: cursor });
+              const pageItems = projectData.node.items.nodes;
+              items = items.concat(pageItems);
+              hasNextPage = projectData.node.items.pageInfo.hasNextPage;
+              cursor = projectData.node.items.pageInfo.endCursor;
+            }
 
-              // 3. Encontra o item correspondente
-              const projectItem = items.find(i => i.content?.id === issueNodeId);
+            // 3. Encontra o item correspondente
+            const projectItem = items.find(i => i.content?.id === issueNodeId);
 
-              if (!projectItem) {
-                console.log(`Issue #${issueNumber} não está no projeto`);
-                console.log(`Adicione a issue ao projeto primeiro: ${issue.html_url}`);
-                return;
-              }
-              console.log(`Item encontrado no projeto`);
+            if (!projectItem) {
+              console.log(`⚠️ Issue #${originalIssue.number} não está no projeto`);
+              console.log(`   Adicione a issue ao projeto primeiro: ${originalIssue.html_url}`);
+              return;
+            }
+            console.log(`✅ Item encontrado no projeto`);
 
-              // 4. Atualiza o status para "Em Teste"
-              console.log(`Atualizando status para "Em Teste"...`);
-              const updateMutation = `
-                mutation ($projectId: ID!, $itemId: ID!, $fieldId: ID!, $value: String!) {
-                  updateProjectV2ItemFieldValue(input: {
-                    projectId: $projectId
-                    itemId: $itemId
-                    fieldId: $fieldId
-                    value: { singleSelectOptionId: $value }
-                  }) {
-                    projectV2Item { 
-                      id 
-                    }
+            // 4. Atualiza o status para "Em Teste"
+            console.log(`🔄 Atualizando status para "Em Teste"...`);
+            const updateMutation = `
+              mutation ($projectId: ID!, $itemId: ID!, $fieldId: ID!, $value: String!) {
+                updateProjectV2ItemFieldValue(input: {
+                  projectId: $projectId
+                  itemId: $itemId
+                  fieldId: $fieldId
+                  value: { singleSelectOptionId: $value }
+                }) {
+                  projectV2Item { 
+                    id 
                   }
                 }
-              `;
-              
-              await github.graphql(updateMutation, {
-                projectId,
-                itemId: projectItem.id,
-                fieldId: statusFieldId,
-                value: STATUS_EM_TESTE
-              });
-              
-              console.log(`Sucesso!`);
-              console.log(`Issue #${issueNumber} (${issueOwner}/${issueRepo}) → "Em Teste"`);
-              console.log(`Trigger: PR #${prNumber} aberto em ${branchRepo}`);
-              
-              // 5. Comentar na issue
-              const commentBody = `PR aberto: [#${prNumber}](${prUrl})\n\n🔄 Status atualizado para **Em Teste**`;
-              await github.rest.issues.createComment({
-                owner: issueOwner,
-                repo: issueRepo,
-                issue_number: issueNumber,
-                body: commentBody
-              });
-              console.log(`Comentário adicionado na issue`);
-              
-            } catch (error) {
-              console.error(`Erro: ${error.message}`);
-              if (error.errors) {
-                console.error('Detalhes:', JSON.stringify(error.errors, null, 2));
               }
-              throw error;
-            }
+            `;
+            
+            await github.graphql(updateMutation, {
+              projectId,
+              itemId: projectItem.id,
+              fieldId: statusFieldId,
+              value: STATUS_EM_TESTE
+            });
+            
+            console.log(`🎉 Sucesso!`);
+            console.log(`   Issue #${originalIssue.number} (DevOps) → "Em Teste"`);
+            console.log(`   Trigger: PR aberto em ${codeRepoOwner}/${codeRepoName}`);
+            
+            // 5. Comentar na issue original
+            const prNumber = context.payload.pull_request.number;
+            const prUrl = context.payload.pull_request.html_url;
+            const commentBody = `🚀 PR aberto: [#${prNumber}](${prUrl})\n\n🔄 Status atualizado para **Em Teste**`;
+            await github.rest.issues.createComment({
+              owner: 'Ambiente-de-Testes',
+              repo: 'Repo-Test-DevOps',
+              issue_number: originalIssue.number,
+              body: commentBody
+            });
+            console.log(`💬 Comentário adicionado na issue original`);
