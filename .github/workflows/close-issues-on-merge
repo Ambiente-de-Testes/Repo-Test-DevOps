@@ -27,7 +27,7 @@ jobs:
         if: steps.extract.outputs.issue_number != ''
         uses: actions/github-script@v7
         with:
-          github-token: ${{ secrets.DEVOPS_TOKEN }}
+          github-token: ${{ secrets.DEVSTATUS_TOKEN }}
           script: |
             const codeRepoOwner = context.repo.owner;
             const codeRepoName = context.repo.repo;
