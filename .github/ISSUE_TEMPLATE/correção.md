@@ -7,15 +7,27 @@ assignees: ''
 
 ---
 
-**Describe the bug**
-A clear and concise description of what the bug is.
+**Caminho do banco de dados: **
+```
+W:\Transfer\_x\DevOps\SituacoesDev\SigoWeb\Versao\v112\
+```
 
-**To Reproduce**
-Steps to reproduce the behavior:
-1. Go to '...'
-2. Click on '....'
-3. Scroll down to '....'
-4. See error
+**Empresa**
+<ins>
+Nina e Miguel Caldeiras e Equipamentos Ltda
+</ins>
+
+**Funcionário**
+<ins>
+Gabriel Manuel Martin Fogaça
+</ins>
+
+***Situação:***
+*Exames que estavam parametrizados para somente pessoas do gênero “Feminino” realizar, está apresentando para o gênero “Masculino” no módulo convocação de Periódico.*
+
+***Exemplo:***
+Colocamos o exame “1,1-dicloro-2,2-bis (P-clorofeniletileno)” para ser aplicado somente para mulheres.
+Caminho: Menu >> Cadastros >> Saúde Ocupacional >> Procedimentos Diagnósticos.
 
 **Expected behavior**
 A clear and concise description of what you expected to happen.
