@@ -166,23 +166,25 @@ jobs:
               console.log(`   Issue #${issueNumber} (${issueOwner}/${issueRepo}) → "Em Desenvolvimento"`);
               console.log(`   Trigger: Branch "${branchName}" criada em ${branchRepo}`);
               
-              // 5. Comentar na issue
-              const commentBody = branchRepo === `${issueOwner}/${issueRepo}` 
-                ? `🌿 Branch \`${branchName}\` criada\n\n✅ Status atualizado para **Em Desenvolvimento**`
-                : `🌿 Branch \`${branchName}\` criada em **${branchRepo}**\n\n✅ Status atualizado para **Em Desenvolvimento**`;
-              
-              await github.rest.issues.createComment({
-                owner: issueOwner,
-                repo: issueRepo,
-                issue_number: issueNumber,
-                body: commentBody
-              });
-              console.log(`💬 Comentário adicionado na issue`);
-              
-            } catch (error) {
-              console.error(`❌ Erro: ${error.message}`);
-              if (error.errors) {
-                console.error('Detalhes:', JSON.stringify(error.errors, null, 2));
-              }
-              throw error;
+             // 5. Comentar na issue
+            let commentBody = branchRepo === `${issueOwner}/${issueRepo}` 
+              ? `🌿 Branch \`${branchName}\` criada\n\n✅ Status atualizado para **Em Desenvolvimento**`
+              : `🌿 Branch \`${branchName}\` criada em **${branchRepo}**\n\n✅ Status atualizado para **Em Desenvolvimento**`;
+            
+            // 🧩 Adiciona menções dos responsáveis
+            if (issue.assignees && issue.assignees.length > 0) {
+              const mentions = issue.assignees.map(a => `@${a.login}`).join(' ');
+              commentBody += `\n\n👥 Notificando responsáveis: ${mentions}`;
+            } else {
+              commentBody += `\n\n👥 (Sem responsáveis atribuídos)`;
             }
+            
+            // 💬 Cria o comentário
+            await github.rest.issues.createComment({
+              owner: issueOwner,
+              repo: issueRepo,
+              issue_number: issueNumber,
+              body: commentBody
+            });
+            
+            console.log(`💬 Comentário adicionado na issue com menções aos responsáveis`);
