@@ -1,4 +1,4 @@
-name: Atualizar "Status-Teste" e notificar responsáveis
+name: Atualizar status e notificar responsáveis
 
 on:
   issues:
@@ -8,19 +8,14 @@ jobs:
   update-project-field:
     runs-on: ubuntu-latest
     steps:
-      - name: Atualizar Status-Teste e notificar
+      - name: Atualizar Status e notificar
         uses: actions/github-script@v7
         with:
           github-token: ${{ secrets.DEVOPS_TOKEN }}
           script: |
             const projectId = "PVT_kwDODixzhM4BFb_a"; //
-            const statusTesteFieldId = "PVTSSF_lADODixzhM4BFb_azg27a1U"; // "Status-Teste"
-            const statusFieldId = "PVTSSF_lADODixzhM4BFb_azg2xh6E"; // 
-
-            // IDs das opções, obtenha sempre pelo GraphQL!
-            const aprovadoOption = "99129982";
-            const revisaoOption = "f46e9ce7";
-            const emDesenvolvimentoOption = "823324b0"; // Exemplo, atualize para sua opção
+            const statusFieldId = "PVTSSF_lADODixzhM4BFb_azg2xh6E"; //
+            const emDesenvolvimentoOption = "823324b0"; // 
 
             const issue = context.payload.issue;
             const label = context.payload.label.name;
@@ -29,12 +24,12 @@ jobs:
             const repo = context.repo.repo;
             const owner = context.repo.owner;
 
-            let optionId, message, statusOptionId;
+            let statusOptionId, message;
             if (label === "Aprovado") {
-              optionId = aprovadoOption;
               message = "✅ Alteração aprovada! Bom trabalho! 🎉";
-            } else if (label === "Revisão Necessária") {
-              optionId = revisaoOption;
+              // Se quiser mudar status, defina o id aqui
+              // statusOptionId = "ID_OPCAO_APROVADO";
+            } else if (label === "Revisão necessária") {
               message = "🔁 Revisão necessária — retornando para desenvolvimento.";
               statusOptionId = emDesenvolvimentoOption;
             } else {
@@ -71,30 +66,6 @@ jobs:
               return;
             }
 
-            // Atualiza o campo "Status-Teste"
-            try {
-              await github.graphql(`
-                mutation($projectId: ID!, $itemId: ID!, $fieldId: ID!, $optionId: String!) {
-                  updateProjectV2ItemFieldValue(input: {
-                    projectId: $projectId,
-                    itemId: $itemId,
-                    fieldId: $fieldId,
-                    value: { singleSelectOptionId: $optionId }
-                  }) {
-                    projectV2Item { id }
-                  }
-                }
-              `, {
-                projectId,
-                itemId: item.id,
-                fieldId: statusTesteFieldId,
-                optionId
-              });
-              console.log(`✅ Campo "Status-Teste" atualizado para opção ${optionId}`);
-            } catch (error) {
-              console.error("❌ Erro ao atualizar Status-Teste:", error.message);
-            }
-
             // Se houver campo Status, também altera para "Em Desenvolvimento"
             if (statusOptionId) {
               try {
@@ -121,7 +92,7 @@ jobs:
               }
             }
 
-            // Notifica os responsáveis
+            // Notifica os responsáveis (GitHub envia email se estiverem com notificação ativada)
             const assignees = (issue.assignees || []).map(a => `@${a.login}`).join(' ');
             const notify = assignees.length > 0 ? `\n\n👥 Notificando: ${assignees}` : '';
 
