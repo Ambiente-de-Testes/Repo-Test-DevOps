@@ -25,11 +25,11 @@ jobs:
             const owner = context.repo.owner;
 
             let statusOptionId, message;
-            if (label === "qa-aprovado") {
+            if (label === "Aprovado") {
               message = "✅ Alteração aprovada! Bom trabalho! 🎉";
               // Se quiser mudar status, defina o id aqui
               // statusOptionId = "ID_OPCAO_APROVADO";
-            } else if (label === "qa-revisao") {
+            } else if (label === "Revisão Necessária") {
               message = "🔁 Revisão necessária — retornando para desenvolvimento.";
               statusOptionId = emDesenvolvimentoOption;
             } else {
