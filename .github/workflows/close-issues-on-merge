@@ -1,0 +1,93 @@
+name: Fechar issue DevOps no merge do PR e notificar assignees
+
+on:
+  pull_request:
+    types: [closed]   # Roda ao fechar PR (inclui merge)
+
+jobs:
+  close-devops-issue:
+    if: github.event.pull_request.merged == true
+    runs-on: ubuntu-latest
+    steps:
+      - name: Extrair número da issue fechada pelo PR
+        id: extract
+        run: |
+          PR_BODY="${{ github.event.pull_request.body }}"
+          PR_TITLE="${{ github.event.pull_request.title }}"
+          ISSUE_NUM=$(echo "$PR_BODY $PR_TITLE" | grep -oE "#[0-9]+" | head -1 | grep -oE "[0-9]+")
+          if [ -n "$ISSUE_NUM" ]; then
+            echo "issue_number=$ISSUE_NUM" >> $GITHUB_OUTPUT
+            echo "✅ Issue referenciada para fechar: #$ISSUE_NUM"
+          else
+            echo "issue_number=" >> $GITHUB_OUTPUT
+            echo "Nenhuma issue referenciada para fechar."
+          fi
+
+      - name: Fecha issue original no DevOps e comenta
+        if: steps.extract.outputs.issue_number != ''
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.DEVOPS_TOKEN }}
+          script: |
+            const codeRepoOwner = context.repo.owner;
+            const codeRepoName = context.repo.repo;
+            const codeIssueNumber = ${{ steps.extract.outputs.issue_number }};
+            const prNumber = context.payload.pull_request.number;
+            const prUrl = context.payload.pull_request.html_url;
+            const prTitle = context.payload.pull_request.title;
+
+            // 1. Busca a issue clonada no repo de código para pegar o título
+            const { data: clonedIssue } = await github.rest.issues.get({
+              owner: codeRepoOwner,
+              repo: codeRepoName,
+              issue_number: codeIssueNumber
+            });
+            const clonedIssueTitle = clonedIssue.title;
+
+            // 2. Busca todas as issues abertas no DevOps
+            let devopsIssues = [];
+            let page = 1;
+            let found = false;
+            while (!found) {
+              const { data: issuesPage } = await github.rest.issues.listForRepo({
+                owner: 'Ambiente-de-Testes',
+                repo: 'Repo-Test-DevOps',
+                state: 'open',
+                per_page: 100,
+                page: page
+              });
+              devopsIssues = devopsIssues.concat(issuesPage);
+              if (issuesPage.length < 100) found = true;
+              page++;
+            }
+
+            // 3. Procura a issue original no DevOps pelo título
+            const originalIssue = devopsIssues.find(i => i.title === clonedIssueTitle);
+
+            if (!originalIssue) {
+              console.log('❌ Issue original não encontrada no DevOps!');
+              return;
+            }
+
+            // 4. Fecha a issue original no DevOps
+            await github.rest.issues.update({
+              owner: 'Ambiente-de-Testes',
+              repo: 'Repo-Test-DevOps',
+              issue_number: originalIssue.number,
+              state: 'closed'
+            });
+            console.log(`✅ Issue original #${originalIssue.number} fechada no DevOps`);
+
+            // 5. Monta menção dos assignees da issue original
+            const assignees = (originalIssue.assignees || []).map(a => `@${a.login}`).join(' ');
+            const notify = assignees.length > 0 ? `\n\n👥 Notificando: ${assignees}` : '';
+
+            // 6. Comenta na issue original do DevOps
+            const commentBody = `🔒 Issue fechada via merge do [PR #${prNumber}](${prUrl}) (${codeRepoOwner}/${codeRepoName})\n\nTítulo do PR: ${prTitle}\n${notify}\n\nEsta issue foi encerrada automaticamente pela integração.`;
+            await github.rest.issues.createComment({
+              owner: 'Ambiente-de-Testes',
+              repo: 'Repo-Test-DevOps',
+              issue_number: originalIssue.number,
+              body: commentBody
+            });
+            console.log(`💬 Comentário adicionado na issue original`);
