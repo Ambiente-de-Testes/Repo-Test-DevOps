@@ -13,9 +13,9 @@ jobs:
         with:
           github-token: ${{ secrets.DEVOPS_TOKEN }}
           script: |
-            const projectId = "PVT_kwDODixzhM4BFb_a"; //
-            const statusFieldId = "PVTSSF_lADODixzhM4BFb_azg2xh6E"; //
-            const emDesenvolvimentoOption = "823324b0"; // 
+            const projectId = "PVT_kwDODixzhM4BFb_a"; // <-- ID do seu Project, ajuste se necessário
+            const statusFieldId = "PVTSSF_lADODixzhM4BFb_azg2xh6E"; // Campo padrão "Status"
+            const emDesenvolvimentoOption = "823324b0"; // Atualize para sua opção se precisar
 
             const issue = context.payload.issue;
             const label = context.payload.label.name;
@@ -25,11 +25,11 @@ jobs:
             const owner = context.repo.owner;
 
             let statusOptionId, message;
-            if (label === "Aprovado") {
+            if (label === "qa-aprovado") {
               message = "✅ Alteração aprovada! Bom trabalho! 🎉";
               // Se quiser mudar status, defina o id aqui
               // statusOptionId = "ID_OPCAO_APROVADO";
-            } else if (label === "Revisão necessária") {
+            } else if (label === "qa-revisao") {
               message = "🔁 Revisão necessária — retornando para desenvolvimento.";
               statusOptionId = emDesenvolvimentoOption;
             } else {
@@ -92,11 +92,11 @@ jobs:
               }
             }
 
-            // Notifica os responsáveis (GitHub envia email se estiverem com notificação ativada)
+            // Menciona todos os assignees na mensagem
             const assignees = (issue.assignees || []).map(a => `@${a.login}`).join(' ');
             const notify = assignees.length > 0 ? `\n\n👥 Notificando: ${assignees}` : '';
 
-            // Cria o comentário
+            // Cria o comentário com menção automática dos assignees
             try {
               await github.rest.issues.createComment({
                 owner,
