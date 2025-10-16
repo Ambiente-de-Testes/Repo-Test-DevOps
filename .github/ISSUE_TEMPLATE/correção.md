@@ -21,19 +21,14 @@ W:\Transfer\_x\DevOps\SituacoesDev\SigoWeb\Versao\v112\
 
 ---
 
-## 🧩 Situação
-
-*Descreva o problema encontrado com clareza e objetividade.*
+## Situação
 
 > Exemplo:  
 > Exames que estavam parametrizados para somente pessoas do gênero “Feminino” realizar estão sendo exibidos também para o gênero “Masculino” no módulo de convocação de Periódico.
 
 ---
 
-## 🧪 Exemplo
+## Exemplo
 
-*Inclua um exemplo prático ou o caminho utilizado para reproduzir o erro.*
-
-> Exemplo:  
 > Colocamos o exame “1,1-dicloro-2,2-bis (P-clorofeniletileno)” para ser aplicado somente para mulheres.  
 > **Caminho:** Menu >> Cadastros >> Saúde Ocupacional >> Procedimentos Diagnósticos.
