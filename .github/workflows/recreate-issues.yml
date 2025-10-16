@@ -37,10 +37,17 @@ jobs:
             exit 1
           fi
 
+          # 🔍 Ignorar labels específicas
+          if [ "$LABEL_NAME" = "Aprovado" ] || [ "$LABEL_NAME" = "Revisão Necessária" ]; then
+            echo "⚠️ Label '$LABEL_NAME' ignorada — não é label de criação de repositório."
+            exit 0
+          fi
+
           echo "repo=$LABEL_NAME" >> $GITHUB_OUTPUT
           echo "Repositório alvo: $LABEL_NAME"
 
       - name: Create issue in target repository
+        if: steps.target.outputs.repo != '' # só executa se repo tiver valor
         run: |
           echo "Criando issue em Ambiente-de-Testes/${{ steps.target.outputs.repo }}..."
           RESPONSE=$(curl -s -o response.json -w "%{http_code}" -X POST \
@@ -58,6 +65,8 @@ jobs:
           echo "Código de resposta: $RESPONSE"
           cat response.json
           if [ "$RESPONSE" -ne 201 ]; then
-            echo "Falha ao criar a issue."
+            echo "❌ Falha ao criar a issue."
             exit 1
+          else
+            echo "✅ Issue criada com sucesso!"
           fi
