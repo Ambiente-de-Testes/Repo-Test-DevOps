@@ -30,10 +30,10 @@ jobs:
             const owner = context.repo.owner;
 
             let optionId, message, statusOptionId;
-            if (label === "qa-aprovado") {
+            if (label === "Aprovado") {
               optionId = aprovadoOption;
               message = "✅ Alteração aprovada! Bom trabalho! 🎉";
-            } else if (label === "qa-revisao") {
+            } else if (label === "Revisão Necessária") {
               optionId = revisaoOption;
               message = "🔁 Revisão necessária — retornando para desenvolvimento.";
               statusOptionId = emDesenvolvimentoOption;
