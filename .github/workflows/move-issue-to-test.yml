@@ -149,11 +149,24 @@ jobs:
             // 5. Comentar na issue original
             const prNumber = context.payload.pull_request.number;
             const prUrl = context.payload.pull_request.html_url;
-            const commentBody = `🚀 PR aberto: [#${prNumber}](${prUrl})\n\n🔄 Status atualizado para **Em Teste**`;
+            
+            // 🧩 Monta o corpo base do comentário
+            let commentBody = `🚀 Pull Request aberto: [#${prNumber}](${prUrl})\n\n🔄 Status atualizado para **Em Teste**`;
+            
+            // 👥 Adiciona menções dos responsáveis, se houver
+            if (originalIssue.assignees && originalIssue.assignees.length > 0) {
+              const mentions = originalIssue.assignees.map(a => `@${a.login}`).join(' ');
+              commentBody += `\n\n👥 Notificando responsáveis: ${mentions}`;
+            } else {
+              commentBody += `\n\n👥 (Sem responsáveis atribuídos)`;
+            }
+            
+            // 💬 Cria o comentário na issue original do DevOps
             await github.rest.issues.createComment({
               owner: 'Ambiente-de-Testes',
               repo: 'Repo-Test-DevOps',
               issue_number: originalIssue.number,
               body: commentBody
             });
-            console.log(`💬 Comentário adicionado na issue original`);
+            
+            console.log(`💬 Comentário adicionado na issue original com menções`);
