@@ -1,141 +1,76 @@
-name: Atualizar "Status-Teste" e notificar responsáveis
+name: Monitorar campo Status-Teste
 
 on:
-  issues:
-    types: [labeled]
+  repository_dispatch:
+    types: [status_teste_changed]
 
 jobs:
-  update-project-field:
+  handle_status_teste:
     runs-on: ubuntu-latest
     steps:
-      - name: Atualizar Status-Teste e notificar
+      - name: Verificar e agir conforme o campo
         uses: actions/github-script@v7
         with:
           github-token: ${{ secrets.DEVOPS_TOKEN }}
           script: |
-            const projectId = "PVT_kwDODixzhM4BFb_a"; //
-            const statusTesteFieldId = "PVTSSF_lADODixzhM4BFb_azg27a1U"; // "Status-Teste"
-            const statusFieldId = "PVTSSF_lADODixzhM4BFb_azg2xh6E"; // 
+            const issueId = context.payload.client_payload.issue_id;
+            const newValue = context.payload.client_payload.new_value;
 
-            // IDs das opções, obtenha sempre pelo GraphQL!
-            const aprovadoOption = "99129982";
-            const revisaoOption = "f46e9ce7";
-            const emDesenvolvimentoOption = "823324b0"; // Exemplo, atualize para sua opção
+            console.log(`Campo Status-Teste atualizado: ${newValue}`);
 
-            const issue = context.payload.issue;
-            const label = context.payload.label.name;
-            const issueId = issue.node_id;
-            const issueNumber = issue.number;
-            const repo = context.repo.repo;
-            const owner = context.repo.owner;
-
-            let optionId, message, statusOptionId;
-            if (label === "Aprovado") {
-              optionId = aprovadoOption;
-              message = "✅ Alteração aprovada! Bom trabalho! 🎉";
-            } else if (label === "Revisão Necessária") {
-              optionId = revisaoOption;
-              message = "🔁 Revisão necessária — retornando para desenvolvimento.";
-              statusOptionId = emDesenvolvimentoOption;
-            } else {
-              console.log("Label ignorada.");
-              return;
-            }
-
-            // Busca o item do projeto (com paginação)
-            let items = [];
-            let cursor = null;
-            let hasNextPage = true;
-            while (hasNextPage) {
-              const query = await github.graphql(`
-                query($projectId: ID!, $after: String) {
-                  node(id: $projectId) {
-                    ... on ProjectV2 {
-                      items(first: 100, after: $after) {
-                        pageInfo { hasNextPage endCursor }
-                        nodes { id content { ... on Issue { id } } }
-                      }
-                    }
-                  }
-                }
-              `, { projectId, after: cursor });
-              const pageItems = query.node.items.nodes;
-              items = items.concat(pageItems);
-              hasNextPage = query.node.items.pageInfo.hasNextPage;
-              cursor = query.node.items.pageInfo.endCursor;
-            }
-
-            const item = items.find(i => i.content?.id === issueId);
-            if (!item) {
-              console.log("⚠️ Issue não está no projeto.");
-              return;
-            }
-
-            // Atualiza o campo "Status-Teste"
-            try {
-              await github.graphql(`
-                mutation($projectId: ID!, $itemId: ID!, $fieldId: ID!, $optionId: String!) {
-                  updateProjectV2ItemFieldValue(input: {
-                    projectId: $projectId,
-                    itemId: $itemId,
-                    fieldId: $fieldId,
-                    value: { singleSelectOptionId: $optionId }
-                  }) {
-                    projectV2Item { id }
-                  }
-                }
-              `, {
-                projectId,
-                itemId: item.id,
-                fieldId: statusTesteFieldId,
-                optionId
-              });
-              console.log(`✅ Campo "Status-Teste" atualizado para opção ${optionId}`);
-            } catch (error) {
-              console.error("❌ Erro ao atualizar Status-Teste:", error.message);
-            }
-
-            // Se houver campo Status, também altera para "Em Desenvolvimento"
-            if (statusOptionId) {
-              try {
-                await github.graphql(`
-                  mutation($projectId: ID!, $itemId: ID!, $fieldId: ID!, $optionId: String!) {
-                    updateProjectV2ItemFieldValue(input: {
-                      projectId: $projectId,
-                      itemId: $itemId,
-                      fieldId: $fieldId,
-                      value: { singleSelectOptionId: $optionId }
-                    }) {
-                      projectV2Item { id }
-                    }
-                  }
-                `, {
-                  projectId,
-                  itemId: item.id,
-                  fieldId: statusFieldId,
-                  optionId: statusOptionId
-                });
-                console.log(`✅ Campo "Status" atualizado para opção ${statusOptionId}`);
-              } catch (error) {
-                console.error("❌ Erro ao atualizar Status:", error.message);
-              }
-            }
-
-            // Notifica os responsáveis
-            const assignees = (issue.assignees || []).map(a => `@${a.login}`).join(' ');
-            const notify = assignees.length > 0 ? `\n\n👥 Notificando: ${assignees}` : '';
-
-            // Cria o comentário
-            try {
+            // Lógica principal
+            if (newValue === "Aprovado") {
+              // Comentário de aprovação
               await github.rest.issues.createComment({
-                owner,
-                repo,
-                issue_number: issueNumber,
-                body: `${message}${notify}`
+                issue_number: issueId,
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                body: "✅ **Mudança aprovada!** O QA marcou como *Aprovado*."
               });
-              console.log(`💬 Comentário adicionado na issue`);
-            } catch (error) {
-              console.error("❌ Erro ao comentar:", error.message);
-            }
 
-            console.log(`✅ Workflow finalizado para label: ${label}`);
+              // Notificar os participantes
+              const issue = await github.rest.issues.get({
+                issue_number: issueId,
+                owner: context.repo.owner,
+                repo: context.repo.repo
+              });
+
+              const assignees = issue.data.assignees.map(a => a.login);
+              for (const user of assignees) {
+                await github.rest.issues.createComment({
+                  issue_number: issueId,
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  body: `🔔 @${user}, sua mudança foi **Aprovada**.`
+                });
+              }
+
+            } else if (newValue === "Revisão Necessária") {
+              // Comentário de revisão
+              await github.rest.issues.createComment({
+                issue_number: issueId,
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                body: "⚠️ **Revisão necessária!** O QA pediu ajustes."
+              });
+
+              // Mover issue para 'Em Desenvolvimento' (se tiver Project configurado)
+              const projectId = "PVT_kwDODixzhM4BFb_a";
+              const statusFieldId = "PVTSSF_lADODixzhM4BFb_azg2xh6E";
+              const inDevOptionId = "your_option_id_for_em_desenvolvimento"; // substitua depois
+
+              const updateQuery = `
+                mutation {
+                  updateProjectV2ItemFieldValue(
+                    input: {
+                      projectId: "${projectId}"
+                      itemId: "${issueId}"
+                      fieldId: "${statusFieldId}"
+                      value: { singleSelectOptionId: "${inDevOptionId}" }
+                    }
+                  ) { clientMutationId }
+                }
+              `;
+
+              await github.graphql(updateQuery);
+            }
