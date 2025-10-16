@@ -7,6 +7,7 @@ jobs:
   update-project:
     if: github.ref_type == 'branch'
     runs-on: ubuntu-latest
+
     steps:
       - name: Extract issue number from branch name
         id: extract
@@ -15,7 +16,6 @@ jobs:
           echo "🌿 Branch criada: $BRANCH_NAME"
           echo "📂 Repositório: ${{ github.repository }}"
           
-          # Tenta extrair número da issue (formatos: issue-123, 123-fix-bug, feature/123, etc)
           ISSUE_NUM=$(echo "$BRANCH_NAME" | grep -oE '[0-9]+' | head -1)
           
           if [ -n "$ISSUE_NUM" ]; then
@@ -25,42 +25,41 @@ jobs:
             echo "⚠️ Nenhum número de issue encontrado no nome da branch"
             echo "issue_number=" >> $GITHUB_OUTPUT
           fi
-      
+
       - name: Update Project Status
         if: steps.extract.outputs.issue_number != ''
         uses: actions/github-script@v7
         with:
-          github-token: ${{ secrets.DEVOPS_TOKEN }}
+          github-token: ${{ secrets.DEVSTATUS_TOKEN }}
           script: |
-            const projectId = "PVT_kwDODixzhM4BFb_a";
-            const statusFieldId = "PVTSSF_lADODixzhM4BFb_azg2xh6E";
-            const STATUS_EM_DESENVOLVIMENTO = "823324b0";
-            
-            const issueNumber = ${{ steps.extract.outputs.issue_number }};
-            const branchName = context.ref.replace('refs/heads/', '');
-            const branchRepo = context.repo.owner + '/' + context.repo.repo;
-            
-            console.log(`🌿 Branch criada: ${branchName}`);
-            console.log(`📂 Repositório da branch: ${branchRepo}`);
-            console.log(`🔍 Procurando issue #${issueNumber}...`);
-
-            // Lista de repositórios onde procurar a issue
-            const reposToSearch = [
-              { owner: 'Ambiente-de-Testes', repo: 'Repo-Test-DevOps' },
-              { owner: context.repo.owner, repo: context.repo.repo }
-            ];
-            
-            // Remove duplicatas
-            const uniqueRepos = reposToSearch.filter((repo, index, self) =>
-              index === self.findIndex(r => r.owner === repo.owner && r.repo === repo.repo)
-            );
-
-            let issue = null;
-            let issueOwner = null;
-            let issueRepo = null;
-
             try {
-              // 1. Procura a issue em cada repositório
+              const projectId = "PVT_kwDODixzhM4BFb_a";
+              const statusFieldId = "PVTSSF_lADODixzhM4BFb_azg2xh6E";
+              const STATUS_EM_DESENVOLVIMENTO = "823324b0";
+
+              const issueNumber = ${{ steps.extract.outputs.issue_number }};
+              const branchName = context.ref.replace('refs/heads/', '');
+              const branchRepo = context.repo.owner + '/' + context.repo.repo;
+
+              console.log(`🌿 Branch criada: ${branchName}`);
+              console.log(`📂 Repositório da branch: ${branchRepo}`);
+              console.log(`🔍 Procurando issue #${issueNumber}...`);
+
+              const reposToSearch = [
+                { owner: 'Ambiente-de-Testes', repo: 'Repo-Test-DevOps' },
+                { owner: context.repo.owner, repo: context.repo.repo }
+              ];
+
+              const uniqueRepos = reposToSearch.filter(
+                (repo, index, self) =>
+                  index === self.findIndex(r => r.owner === repo.owner && r.repo === repo.repo)
+              );
+
+              let issue = null;
+              let issueOwner = null;
+              let issueRepo = null;
+
+              // 🔎 Procura a issue
               for (const repo of uniqueRepos) {
                 try {
                   console.log(`   Tentando ${repo.owner}/${repo.repo}...`);
@@ -92,7 +91,7 @@ jobs:
 
               const issueNodeId = issue.node_id;
 
-              // 2. Busca o projeto e seus itens
+              // 📊 Busca o projeto
               console.log(`📊 Buscando itens do projeto...`);
               const projectQuery = `
                 query ($projectId: ID!) {
@@ -100,10 +99,6 @@ jobs:
                     ... on ProjectV2 {
                       title
                       items(first: 100) {
-                        pageInfo {
-                          hasNextPage
-                          endCursor
-                        }
                         nodes {
                           id
                           content {
@@ -111,9 +106,7 @@ jobs:
                               id 
                               number 
                               title
-                              repository {
-                                nameWithOwner
-                              }
+                              repository { nameWithOwner }
                             }
                           }
                         }
@@ -128,7 +121,6 @@ jobs:
               console.log(`📋 Projeto: ${projectData.node.title}`);
               console.log(`📋 Total de itens: ${items.length}`);
 
-              // 3. Encontra o item correspondente
               const projectItem = items.find(i => i.content?.id === issueNodeId);
 
               if (!projectItem) {
@@ -136,10 +128,10 @@ jobs:
                 console.log(`   Adicione a issue ao projeto primeiro: ${issue.html_url}`);
                 return;
               }
-              console.log(`✅ Item encontrado no projeto`);
 
-              // 4. Atualiza o status
+              console.log(`✅ Item encontrado no projeto`);
               console.log(`🔄 Atualizando status para "Em Desenvolvimento"...`);
+
               const updateMutation = `
                 mutation ($projectId: ID!, $itemId: ID!, $fieldId: ID!, $value: String!) {
                   updateProjectV2ItemFieldValue(input: {
@@ -148,9 +140,7 @@ jobs:
                     fieldId: $fieldId
                     value: { singleSelectOptionId: $value }
                   }) {
-                    projectV2Item { 
-                      id 
-                    }
+                    projectV2Item { id }
                   }
                 }
               `;
@@ -166,25 +156,28 @@ jobs:
               console.log(`   Issue #${issueNumber} (${issueOwner}/${issueRepo}) → "Em Desenvolvimento"`);
               console.log(`   Trigger: Branch "${branchName}" criada em ${branchRepo}`);
               
-             // 5. Comentar na issue
-            let commentBody = branchRepo === `${issueOwner}/${issueRepo}` 
-              ? `🌿 Branch \`${branchName}\` criada\n\n✅ Status atualizado para **Em Desenvolvimento**`
-              : `🌿 Branch \`${branchName}\` criada em **${branchRepo}**\n\n✅ Status atualizado para **Em Desenvolvimento**`;
-            
-            // 🧩 Adiciona menções dos responsáveis
-            if (issue.assignees && issue.assignees.length > 0) {
-              const mentions = issue.assignees.map(a => `@${a.login}`).join(' ');
-              commentBody += `\n\n👥 Notificando responsáveis: ${mentions}`;
-            } else {
-              commentBody += `\n\n👥 (Sem responsáveis atribuídos)`;
+              // 💬 Comenta na issue
+              let commentBody =
+                branchRepo === `${issueOwner}/${issueRepo}`
+                  ? `🌿 Branch \`${branchName}\` criada\n\n✅ Status atualizado para **Em Desenvolvimento**`
+                  : `🌿 Branch \`${branchName}\` criada em **${branchRepo}**\n\n✅ Status atualizado para **Em Desenvolvimento**`;
+
+              if (issue.assignees && issue.assignees.length > 0) {
+                const mentions = issue.assignees.map(a => `@${a.login}`).join(' ');
+                commentBody += `\n\n👥 Notificando responsáveis: ${mentions}`;
+              } else {
+                commentBody += `\n\n👥 (Sem responsáveis atribuídos)`;
+              }
+
+              await github.rest.issues.createComment({
+                owner: issueOwner,
+                repo: issueRepo,
+                issue_number: issueNumber,
+                body: commentBody
+              });
+
+              console.log(`💬 Comentário adicionado na issue com menções aos responsáveis`);
+            } catch (error) {
+              console.error("🚨 Erro inesperado:", error);
+              core.setFailed(`Erro ao mover issue: ${error.message}`);
             }
-            
-            // 💬 Cria o comentário
-            await github.rest.issues.createComment({
-              owner: issueOwner,
-              repo: issueRepo,
-              issue_number: issueNumber,
-              body: commentBody
-            });
-            
-            console.log(`💬 Comentário adicionado na issue com menções aos responsáveis`);
